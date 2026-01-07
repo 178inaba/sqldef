@@ -1457,7 +1457,9 @@ func (g *Generator) generateDDLsForCreateTable(currentTable Table, desired Creat
 
 		if currentIndex := g.findIndexByName(currentTable.indexes, desiredIndex.name); currentIndex != nil {
 			// Drop and add index as needed.
-			if !g.areSameIndexes(*currentIndex, desiredIndex) {
+			// Use areSameIndexesConsideringRenamedColumns to handle cases where columns are renamed
+			// (PostgreSQL automatically updates index column references on RENAME COLUMN)
+			if !g.areSameIndexesConsideringRenamedColumns(*currentIndex, desiredIndex, desired.table) {
 				ddls = append(ddls, g.generateDropIndex(desired.table.name, desiredIndex.name, desiredIndex.constraint))
 				ddls = append(ddls, g.generateAddIndex(desired.table.name, desiredIndex))
 			}
@@ -5207,6 +5209,122 @@ func (g *Generator) areSameIndexes(indexA Index, indexB Index) bool {
 				return false
 			}
 			if indexA.constraintOptions.initiallyDeferred != indexB.constraintOptions.initiallyDeferred {
+				return false
+			}
+		}
+	}
+
+	return true
+}
+
+// areSameIndexesConsideringRenamedColumns compares two indexes while considering column renames.
+// When a column is renamed via @renamed annotation, PostgreSQL automatically updates the index
+// to reference the new column name. This function treats renamed columns as matching.
+func (g *Generator) areSameIndexesConsideringRenamedColumns(currentIndex Index, desiredIndex Index, desiredTable Table) bool {
+	if currentIndex.unique != desiredIndex.unique {
+		return false
+	}
+	if currentIndex.primary != desiredIndex.primary {
+		return false
+	}
+	if currentIndex.vector != desiredIndex.vector {
+		return false
+	}
+	if len(currentIndex.columns) != len(desiredIndex.columns) {
+		return false
+	}
+
+	// Build a map of renamed columns: new name -> old name
+	renamedColumns := make(map[string]string)
+	for _, col := range desiredTable.columns {
+		if !col.renamedFrom.IsEmpty() {
+			renamedColumns[col.name.Name] = col.renamedFrom.Name
+		}
+	}
+
+	for i, currentColumn := range currentIndex.columns {
+		if currentColumn.direction == "" {
+			currentColumn.direction = AscScr
+		}
+		if desiredIndex.columns[i].direction == "" {
+			desiredIndex.columns[i].direction = AscScr
+		}
+
+		var normalizedCurrent, normalizedDesired string
+		if !g.config.LegacyIgnoreQuotes {
+			normalizedCurrent = g.formatExprQuoteAware(normalizeExpr(currentIndex.columns[i].columnExpr, g.mode))
+			normalizedDesired = g.formatExprQuoteAware(normalizeExpr(desiredIndex.columns[i].columnExpr, g.mode))
+		} else {
+			normalizedCurrent = parser.String(normalizeExpr(currentIndex.columns[i].columnExpr, g.mode))
+			normalizedDesired = parser.String(normalizeExpr(desiredIndex.columns[i].columnExpr, g.mode))
+		}
+
+		// Check if columns match directly or via rename
+		columnsMatch := normalizedCurrent == normalizedDesired
+		if !columnsMatch {
+			// Check if desired column was renamed from the current column name
+			if oldName, ok := renamedColumns[normalizedDesired]; ok && oldName == normalizedCurrent {
+				columnsMatch = true
+			}
+		}
+
+		if !columnsMatch || currentColumn.direction != desiredIndex.columns[i].direction {
+			return false
+		}
+	}
+
+	// The rest of the comparison is the same as areSameIndexes
+	if !g.areSameWhereClause(currentIndex.where, desiredIndex.where) {
+		return false
+	}
+
+	if len(currentIndex.included) != len(desiredIndex.included) {
+		return false
+	}
+	for i, currentIncluded := range currentIndex.included {
+		if currentIncluded != desiredIndex.included[i] {
+			return false
+		}
+	}
+
+	if !(g.mode == GeneratorModeMssql && currentIndex.constraint && desiredIndex.constraint && currentIndex.unique && desiredIndex.unique) {
+		currentOptions := currentIndex.options
+		desiredOptions := desiredIndex.options
+		if g.mode == GeneratorModeMysql {
+			if len(currentOptions) == 0 && !currentIndex.vector {
+				currentOptions = []IndexOption{
+					{optionName: "using", value: &Value{valueType: ValueTypeStr, raw: "btree", strVal: "btree"}},
+				}
+			}
+			if len(desiredOptions) == 0 && !desiredIndex.vector {
+				desiredOptions = []IndexOption{
+					{optionName: "using", value: &Value{valueType: ValueTypeStr, raw: "btree", strVal: "btree"}},
+				}
+			}
+		}
+		for _, optionB := range desiredOptions {
+			if optionA := findIndexOptionByName(currentOptions, optionB.optionName); optionA != nil {
+				if !g.areSameIdentifiers(optionA.value, optionB.value) {
+					return false
+				}
+			} else {
+				return false
+			}
+		}
+	}
+
+	if g.mode != GeneratorModeMssql && g.mode != GeneratorModeMysql {
+		if currentIndex.constraint != desiredIndex.constraint {
+			return false
+		}
+		if (currentIndex.constraintOptions != nil) != (desiredIndex.constraintOptions != nil) {
+			return false
+		}
+		if currentIndex.constraintOptions != nil && desiredIndex.constraintOptions != nil {
+			if currentIndex.constraintOptions.deferrable != desiredIndex.constraintOptions.deferrable {
+				return false
+			}
+			if currentIndex.constraintOptions.initiallyDeferred != desiredIndex.constraintOptions.initiallyDeferred {
 				return false
 			}
 		}
