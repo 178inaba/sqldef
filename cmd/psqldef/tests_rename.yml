@@ -278,3 +278,47 @@ RenameColumnWithCompositeUniqueConstraint:
     ALTER TABLE "public"."users" DROP CONSTRAINT "users_username_email_key";
     ALTER TABLE "public"."users" ADD CONSTRAINT "users_username_email_key" UNIQUE ("username", "email");
     ALTER TABLE "public"."users" DROP COLUMN "user_name";
+RenameColumnWithCreateUniqueIndex:
+  current: |
+    CREATE TABLE users (
+      id bigint NOT NULL,
+      username varchar(100) NOT NULL,
+      age integer
+    );
+    CREATE UNIQUE INDEX users_username_idx ON users (username);
+  desired: |
+    CREATE TABLE users (
+      id bigint NOT NULL,
+      user_name varchar(100) NOT NULL, -- @renamed from=username
+      age integer
+    );
+    CREATE UNIQUE INDEX users_username_idx ON users (user_name);
+  up: |
+    ALTER TABLE "public"."users" RENAME COLUMN "username" TO "user_name";
+  down: |
+    ALTER TABLE "public"."users" ADD COLUMN "username" varchar(100) NOT NULL;
+    DROP INDEX "public"."users_username_idx";
+    CREATE UNIQUE INDEX users_username_idx ON users (username);
+    ALTER TABLE "public"."users" DROP COLUMN "user_name";
+RenameColumnWithCreateIndex:
+  current: |
+    CREATE TABLE users (
+      id bigint NOT NULL,
+      username varchar(100) NOT NULL,
+      age integer
+    );
+    CREATE INDEX users_username_idx ON users (username);
+  desired: |
+    CREATE TABLE users (
+      id bigint NOT NULL,
+      user_name varchar(100) NOT NULL, -- @renamed from=username
+      age integer
+    );
+    CREATE INDEX users_username_idx ON users (user_name);
+  up: |
+    ALTER TABLE "public"."users" RENAME COLUMN "username" TO "user_name";
+  down: |
+    ALTER TABLE "public"."users" ADD COLUMN "username" varchar(100) NOT NULL;
+    DROP INDEX "public"."users_username_idx";
+    CREATE INDEX users_username_idx ON users (username);
+    ALTER TABLE "public"."users" DROP COLUMN "user_name";

@@ -1865,7 +1865,11 @@ func (g *Generator) generateDDLsForCreateIndex(tableName QualifiedName, desiredI
 		}
 	} else {
 		// Index found. If it's different, drop and add index.
-		if !g.areSameIndexes(*currentIndex, desiredIndex) {
+		// Use areSameIndexesConsideringRenamedColumns to handle cases where columns are renamed
+		// (PostgreSQL automatically updates index column references on RENAME COLUMN)
+		desiredTable := g.findTableByName(g.desiredTables, tableName)
+		sameIndex := desiredTable != nil && g.areSameIndexesConsideringRenamedColumns(*currentIndex, desiredIndex, *desiredTable)
+		if !sameIndex {
 			ddls = append(ddls, g.generateDropIndex(currentTable.name, currentIndex.name, currentIndex.constraint))
 			ddls = append(ddls, statement)
 
@@ -1879,6 +1883,10 @@ func (g *Generator) generateDDLsForCreateIndex(tableName QualifiedName, desiredI
 			}
 			currentTable.indexes = newIndexes // simulate index change. TODO: use []*Index in table and destructively modify it
 		}
+		if desiredTable != nil {
+			desiredTable.indexes = append(desiredTable.indexes, desiredIndex)
+		}
+		return ddls, nil
 	}
 
 	desiredTable := g.findTableByName(g.desiredTables, tableName)
