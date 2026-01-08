@@ -322,3 +322,25 @@ RenameColumnWithCreateIndex:
     DROP INDEX "public"."users_username_idx";
     CREATE INDEX users_username_idx ON users (username);
     ALTER TABLE "public"."users" DROP COLUMN "user_name";
+RenameColumnWithCompositePrimaryKey:
+  current: |
+    CREATE TABLE users (
+      id bigint NOT NULL,
+      username varchar(100) NOT NULL,
+      email varchar(255) NOT NULL,
+      PRIMARY KEY (username, email)
+    );
+  desired: |
+    CREATE TABLE users (
+      id bigint NOT NULL,
+      user_name varchar(100) NOT NULL, -- @renamed from=username
+      email varchar(255) NOT NULL,
+      PRIMARY KEY (user_name, email)
+    );
+  up: |
+    ALTER TABLE "public"."users" RENAME COLUMN "username" TO "user_name";
+  down: |
+    ALTER TABLE "public"."users" ADD COLUMN "username" varchar(100) NOT NULL;
+    ALTER TABLE "public"."users" DROP CONSTRAINT "users_pkey";
+    ALTER TABLE "public"."users" ADD PRIMARY KEY ("username", "email");
+    ALTER TABLE "public"."users" DROP COLUMN "user_name";

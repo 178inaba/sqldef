@@ -1270,7 +1270,7 @@ func (g *Generator) generateDDLsForCreateTable(currentTable Table, desired Creat
 	currentPrimaryKey := currentTable.PrimaryKey()
 	desiredPrimaryKey := desired.table.PrimaryKey()
 
-	primaryKeysChanged := !g.areSamePrimaryKeys(currentPrimaryKey, desiredPrimaryKey)
+	primaryKeysChanged := !g.areSamePrimaryKeys(currentPrimaryKey, desiredPrimaryKey, desired.table)
 
 	// Remove old AUTO_INCREMENT from deleted column before deleting key (primary or not)
 	// and if primary key changed
@@ -5077,7 +5077,7 @@ func isNullDefault(def *DefaultDefinition) bool {
 	return false
 }
 
-func (g *Generator) areSamePrimaryKeys(primaryKeyA *Index, primaryKeyB *Index) bool {
+func (g *Generator) areSamePrimaryKeys(primaryKeyA *Index, primaryKeyB *Index, desiredTable Table) bool {
 	if primaryKeyA != nil && primaryKeyB != nil {
 		// For MSSQL, when comparing PRIMARY KEY constraints,
 		// ignore the name if one is auto-generated (PK__*) and the other is unnamed/synthetic ("PRIMARY")
@@ -5089,7 +5089,9 @@ func (g *Generator) areSamePrimaryKeys(primaryKeyA *Index, primaryKeyB *Index) b
 				return g.areSamePrimaryKeyColumns(*primaryKeyA, *primaryKeyB)
 			}
 		}
-		return g.areSameIndexes(*primaryKeyA, *primaryKeyB)
+		// Use areSameIndexesConsideringRenamedColumns to handle cases where columns are renamed
+		// (PostgreSQL automatically updates primary key column references on RENAME COLUMN)
+		return g.areSameIndexesConsideringRenamedColumns(*primaryKeyA, *primaryKeyB, desiredTable)
 	} else {
 		return primaryKeyA == nil && primaryKeyB == nil
 	}
